@@ -1,6 +1,6 @@
 name: astrbot_plugin_reread
 display_name: 复读姬
-desc: 复读姬，可设置：复读阈值（文本、图片、表情、At消息），复读/打断概率，屏蔽单人，违禁词，冷却时间
+desc: 非常轻量好用的复读姬，可单独设置复读阈值（文本、图片、表情）、复读概率、打断概率、屏蔽单人
 help: 略
 version: v1.1.5
 author: Zhalslar
