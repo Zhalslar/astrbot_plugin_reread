@@ -8,7 +8,6 @@ from astrbot.api.event import filter
 from astrbot.api.star import Context, Star
 from astrbot.core import AstrBotConfig
 from astrbot.core.message.components import BaseMessageComponent, Face, Image, Plain
-from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform import AstrMessageEvent
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
@@ -222,7 +221,6 @@ class RereadPlugin(Star):
                 out_seg = Plain("打断！")
 
             # 执行复读
-            await event.send(MessageChain(chain=[out_seg]))  # type: ignore
             yield event.chain_result([out_seg])
 
             # 标记复读成功
