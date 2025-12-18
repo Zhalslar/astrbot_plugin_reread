@@ -1,159 +1,278 @@
 import asyncio
-from typing import Dict
-
-from astrbot.api.event import filter
-from astrbot.api.star import Context, Star, register
-from astrbot.core import AstrBotConfig
-import astrbot.core.message.components as Comp
-from astrbot.core.message.message_event_result import MessageChain
-from astrbot.core.platform import AstrMessageEvent
 import random
 from collections import deque
+from collections.abc import Sequence
+from typing import TypedDict
 
+from astrbot.api.event import filter
+from astrbot.api.star import Context, Star
+from astrbot.core import AstrBotConfig
+from astrbot.core.message.components import BaseMessageComponent, Face, Image, Plain
+from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.platform import AstrMessageEvent
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
+# ============================================================
+# 类型定义
+# ============================================================
 
-@register("astrbot_plugin_reread","Zhalslar","...","...",)
+
+class MsgRecord(TypedDict):
+    """
+    单条复读窗口记录（仅单段消息）
+    """
+
+    send_id: str
+    seg: BaseMessageComponent
+
+
+# ============================================================
+# GroupState —— 单群状态（单段消息 + 幂等保护）
+# ============================================================
+
+
+class GroupState:
+    """
+    单群状态容器
+
+    仅负责「状态」本身，不包含任何业务规则：
+    - 按消息类型分组的消息窗口（deque + maxlen）
+    - 最近一次成功复读的消息指纹（用于幂等保护）
+    """
+
+    def __init__(self, thresholds: dict[str, int]):
+        # 群级并发保护
+        self.lock = asyncio.Lock()
+
+        # {seg_type: deque[MsgRecord]}
+        # deque 的 maxlen 由 thresholds 决定
+        self.messages: dict[str, deque[MsgRecord]] = {
+            seg_type: deque(maxlen=limit) for seg_type, limit in thresholds.items()
+        }
+
+        # 最近一次成功复读的内容指纹
+        self.last_repeated_fingerprint: str | None = None
+
+    # ───────── 消息窗口操作 ─────────
+
+    def clear_if_same_sender(
+        self,
+        seg_type: str,
+        send_id: str,
+        require_different_people: bool,
+    ) -> None:
+        """
+        若要求必须不同人复读：
+        - 当前消息发送者与窗口中最后一条相同 → 清空窗口
+        """
+        if not require_different_people:
+            return
+
+        lst = self.messages[seg_type]
+        if lst and lst[-1]["send_id"] == send_id:
+            lst.clear()
+
+    def push_message(
+        self,
+        seg_type: str,
+        send_id: str,
+        seg: BaseMessageComponent,
+    ) -> None:
+        """
+        将单段消息压入对应类型的窗口
+        """
+        self.messages[seg_type].append(
+            {
+                "send_id": send_id,
+                "seg": seg,
+            }
+        )
+
+    def get_messages(self, seg_type: str) -> deque[MsgRecord]:
+        """
+        获取指定消息类型的窗口
+        """
+        return self.messages[seg_type]
+
+    def clear_all(self) -> None:
+        """
+        清空当前群内所有消息窗口
+        （通常在一次成功复读后调用）
+        """
+        for lst in self.messages.values():
+            lst.clear()
+
+    # ───────── 幂等保护 ─────────
+
+    def is_same_as_last_repeat(self, fingerprint: str) -> bool:
+        """
+        判断当前候选复读内容
+        是否与上一次成功复读的内容完全一致
+        """
+        return self.last_repeated_fingerprint == fingerprint
+
+    def mark_repeated(self, fingerprint: str) -> None:
+        """
+        标记一次成功复读：
+        - 记录指纹
+        - 清空所有窗口，避免立刻二次触发
+        """
+        self.last_repeated_fingerprint = fingerprint
+        self.clear_all()
+
+
+# ============================================================
+# RereadPlugin —— 规则 + 副作用
+# ============================================================
+
+
 class RereadPlugin(Star):
+    """
+    复读插件主体
+
+    职责：
+    - 消息过滤
+    - 复读判定
+    - 副作用（发送消息、打断、stop_event）
+    """
+
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.reread_group_whitelist = config.get("reread_group_whitelist", [])
-        # 是否要求消息要来自不同人才复读
-        self.require_different_people: bool = config.get(
-            "require_different_people", False
-        )
-        # 违禁词
-        self.banned_words: str = config.get("banned_words", [])
-        # 各消息类型的复读阈值
-        self.thresholds: Dict = config.get("thresholds", {})
-        # 支持的消息类型
-        self.supported_type: list = list(self.thresholds.keys())
-        # 复读概率
-        self.repeat_probability: float = config.get("repeat_probability", 0.5)
-        # 打断复读概率
-        self.interrupt_probability: float = config.get("interrupt_probability", 0.1)
-        # 复读冷却时间（秒）
-        self.cooldown_seconds = config.get("cooldown_seconds", 30)
-        # 存储每个群组的上一次复读的时间点
-        self.repeat_cooldowns = {}  # {group_id: timestamp}
-        # 存储每个群组的lock
-        self.group_locks = {}
-        # 存储每个群组的消息记录，值为 deque 对象
-        self.messages_dict = {}
-        """
-        messages_dict = {
-            "group_id": {
-                "seg_type": [
-                    {"send_id": send_id, "chain": chain}
-                ]
-            }
-        }
-        """
+        self.conf = config
+        self.thresholds: dict[str, int] = config["thresholds"]
+        self.supported_type = list(self.thresholds.keys())
 
-    async def get_group_lock(self, group_id):
-        if group_id not in self.group_locks:
-            self.group_locks[group_id] = asyncio.Lock()
-        return self.group_locks[group_id]
+        # {group_id: GroupState}
+        self.group_states: dict[str, GroupState] = {}
+
+    # ───────── State 管理 ─────────
+
+    def get_group_state(self, group_id: str) -> GroupState:
+        """
+        获取或初始化指定群的状态对象
+        """
+        if group_id not in self.group_states:
+            self.group_states[group_id] = GroupState(self.thresholds)
+        return self.group_states[group_id]
+
+    # ───────── 主处理逻辑 ─────────
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
     async def reread_handle(self, event: AstrMessageEvent):
-        """复读处理函数"""
-        # 过滤唤醒bot的消息
+        """
+        群消息复读处理入口
+        """
+        # 忽略唤醒 / at bot 的消息
         if event.is_at_or_wake_command:
             return
-        # 群白名单
-        group_id = event.get_group_id()
-        if self.reread_group_whitelist and group_id not in self.reread_group_whitelist:
-            return
-        # 过滤空消息
-        chain = event.get_messages()
-        if not chain:
-            return
-        # 过滤违禁词
-        for word in self.banned_words:
-            if word in event.message_str:
-                return
 
-        # 取第一个消息段判断消息类型是否支持
-        first_seg = chain[0]
-        seg_type = str(first_seg.type).split(".")[-1]
+        chain = event.get_messages()
+
+        # 仅处理单段消息
+        if len(chain) != 1:
+            return
+
+        seg = chain[0]
+        seg_type = str(seg.type).split(".")[-1]
+
+        # 仅处理配置中声明支持的消息类型
         if seg_type not in self.supported_type:
             return
 
-        # 获取当前群组的锁
-        lock = await self.get_group_lock(group_id)
-        async with lock:  # 加锁，防止并发
-            # 如果群组 ID 不在 msg_dict 中，初始化一个 deque 对象，最大长度为各自的阈值
-            if group_id not in self.messages_dict:
-                self.messages_dict[group_id] = {
-                    key: deque(maxlen=self.thresholds.get(key))
-                    for key in self.supported_type
-                }
+        group_id = event.get_group_id()
 
-            # 获取该群组的消息记录
-            group_messages = self.messages_dict[group_id]
-            msg_list = group_messages[seg_type]
+        # 群白名单过滤
+        whitelist = self.conf["reread_group_whitelist"]
+        if whitelist and group_id not in whitelist:
+            return
 
-            # 检查消息是否来自同一个用户, 如果来自同一个用户，清空消息记录
-            send_id = event.get_sender_id()
-            if (
-                self.require_different_people
-                and msg_list
-                and msg_list[-1]["send_id"] == send_id
-            ):
-                msg_list.clear()
+        state = self.get_group_state(group_id)
+        send_id = event.get_sender_id()
 
-            # 将当前消息和用户ID添加到该群组的消息记录中
-            msg_list.append({"send_id": send_id, "chain": chain})
+        async with state.lock:
+            # 同一用户连续发言 → 清空窗口
+            state.clear_if_same_sender(
+                seg_type,
+                send_id,
+                self.conf["require_different_people"],
+            )
 
-            # 获取当前时间
-            msg_time = event.message_obj.timestamp
+            # 记录当前消息
+            state.push_message(seg_type, send_id, seg)
+            msg_list = state.get_messages(seg_type)
 
-            # 检查是否处于冷却期
-            if group_id in self.repeat_cooldowns:
-                last_time = self.repeat_cooldowns[group_id]
-                if msg_time - last_time < self.cooldown_seconds:
-                    return
+            # 是否满足复读阈值与一致性条件
+            if not self._can_repeat(seg_type, msg_list):
+                return
 
-            # 如果该群组的消息记录中有 threshold 条消息，并且满足复读概率，则复读
-            if (
-                len(msg_list) >= self.thresholds.get(seg_type, 3)
-                and random.random() < self.repeat_probability
-                and all(
-                    self.is_equal(msg_list[0]["chain"], msg["chain"])
-                    for msg in msg_list
-                )
-            ):
-                # 打断复读机制
-                if random.random() < self.interrupt_probability:
-                    chain = [Comp.Plain("打断！")]
+            # 计算当前复读候选内容的指纹
+            fingerprint = self._make_fingerprint(seg_type, msg_list[0]["seg"])
 
-                await event.send(MessageChain(chain=chain))  # type: ignore
-                msg_list.clear()
-                self.repeat_cooldowns[group_id] = msg_time
-                event.stop_event()
+            # 与上一次成功复读内容相同 → 跳过（幂等保护）
+            if state.is_same_as_last_repeat(fingerprint):
+                return
 
-    def is_equal(
+            # 概率判定
+            if random.random() >= self.conf["repeat_probability"]:
+                return
+
+            # 打断机制
+            out_seg = seg
+            if random.random() < self.conf["interrupt_probability"]:
+                out_seg = Plain("打断！")
+
+            # 执行复读
+            await event.send(MessageChain(chain=[out_seg]))  # type: ignore
+            yield event.chain_result([out_seg])
+
+            # 标记复读成功
+            state.mark_repeated(fingerprint)
+            event.stop_event()
+
+    # ───────── 判定逻辑 ─────────
+
+    def _can_repeat(
         self,
-        chain1: list[Comp.BaseMessageComponent],
-        chain2: list[Comp.BaseMessageComponent],
-    ):
-        """判断两条消息链是否满足相等条件"""
-        if len(chain1) != len(chain2):
+        seg_type: str,
+        msg_list: Sequence[MsgRecord],
+    ) -> bool:
+        """
+        判断当前窗口是否满足复读条件：
+        - 数量达到阈值
+        - 所有消息的指纹完全一致
+        """
+        threshold = self.thresholds.get(seg_type, 3)
+        if len(msg_list) < threshold:
             return False
-        # 只取第一个seg进行判断
-        seg1 = chain1[0]
-        seg2 = chain2[0]
-        if isinstance(seg1, Comp.Plain) and isinstance(seg2, Comp.Plain):
-            return seg1.text == seg2.text
 
-        if isinstance(seg1, Comp.Image) and isinstance(seg2, Comp.Image):
-            return seg1.file == seg2.file
+        base_fp = self._make_fingerprint(seg_type, msg_list[0]["seg"])
 
-        if isinstance(seg1, Comp.Face) and isinstance(seg2, Comp.Face):
-            return seg1.id == seg2.id
+        for msg in msg_list:
+            if self._make_fingerprint(seg_type, msg["seg"]) != base_fp:
+                return False
 
-        if isinstance(seg1, Comp.At) and isinstance(seg2, Comp.At):
-            return seg1.qq == seg2.qq
+        return True
 
-        return False
+    def _make_fingerprint(
+        self,
+        seg_type: str,
+        seg: BaseMessageComponent,
+    ) -> str:
+        """
+        单段消息的唯一判等 / 幂等指纹
+
+        该指纹：
+        - 决定是否可以复读
+        - 决定是否与上一次复读内容相同
+        """
+        if isinstance(seg, Plain):
+            return f"text:{seg.text}"
+
+        if isinstance(seg, Image):
+            key = seg.file or seg.url or seg.path
+            return f"image:{key}"
+
+        if isinstance(seg, Face):
+            return f"face:{seg.id}"
+
+        return f"unknown:{seg_type}"

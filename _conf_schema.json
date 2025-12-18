@@ -14,63 +14,63 @@
     "thresholds": {
         "description": "复读阈值设置",
         "type": "object",
-        "hint": "阈值太低容易导致刷屏，太高则难以触发复读",
+        "hint": "阈值太低容易导致刷屏，太高则难以触发复读。注意：考虑到其他类型消息出现得很少，这里仅可配置文本、图片、表情，其他类型一律不复读",
         "items": {
             "Plain": {
                 "description": "文本复读阈值",
-                "type": "int",
                 "hint": "重复发同一句话多少次后复读",
+                "type": "int",
+                "slider": {
+                    "min": 2,
+                    "max": 5,
+                    "step": 1
+                },
                 "default": 3
             },
             "Image": {
                 "description": "图片复读阈值",
-                "type": "int",
                 "hint": "重复发同一张图片多少次后复读",
+                "type": "int",
+                "slider": {
+                    "min": 2,
+                    "max": 5,
+                    "step": 1
+                },
                 "default": 3
             },
             "Face": {
                 "description": "表情复读阈值",
-                "type": "int",
                 "hint": "重复发同一个QQ表情多少次后复读",
-                "default": 2
-            },
-            "At": {
-                "description": "@复读阈值",
                 "type": "int",
-                "hint": "重复@同一个人多少次后复读",
-                "default": 3
+                "slider": {
+                    "min": 2,
+                    "max": 5,
+                    "step": 1
+                },
+                "default": 2
             }
         }
     },
     "repeat_probability": {
         "description": "复读概率",
-        "type": "float",
         "hint": "到达复读阈值后，进行复读的概率，设小一些可有效防止频繁复读",
+        "type": "float",
+        "slider": {
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+        },
         "default": 0.8
     },
     "interrupt_probability": {
         "description": "打断复读概率",
-        "type": "float",
         "hint": "满足复读概率后，将复读内容替换成“打断！”的概率，别设太高，小心被打哟~",
+        "type": "float",
+        "slider": {
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+        },
         "default": 0.1
-    },
-    "cooldown_seconds": {
-        "description": "复读冷却时间",
-        "type": "int",
-        "hint": "前后两次复读需要等待的时间间隔（单位为秒），设大一些可有效防止频繁复读",
-        "default": 30
-    },
-    "banned_words": {
-        "description": "违禁词",
-        "type": "list",
-        "hint": "消息文本中含有违禁词时，终止复读，可防止复读一些危险言论",
-        "default": [
-            "免费",
-            "广告",
-            "操",
-            "赌",
-            "政",
-            "党"
-        ]
     }
 }
