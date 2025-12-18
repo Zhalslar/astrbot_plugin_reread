@@ -1,11 +1,10 @@
-
 <div align="center">
 
 ![:name](https://count.getloli.com/@astrbot_plugin_reread?name=astrbot_plugin_reread&theme=minecraft&padding=6&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
 
 # astrbot_plugin_reread
 
-_✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 复读插件 ✨_  
+_✨ 复读插件 ✨_  
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -16,35 +15,53 @@ _✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 复读插件 ✨_
 
 ## 🤝 介绍
 
-不依赖任何数据库的群聊复读姬，可单独设置文本、图片、表情、At消息的复读阈值，可设置复读概率，可要求消息要来自不同人，可设置违禁词
+不依赖任何数据库的群聊复读插件。
+
+- 支持 **文本 / 图片 / 表情** 分别设置复读阈值  
+- 支持 **复读概率** 与 **打断概率**  
+- 可要求 **消息必须来自不同用户**  
+- 仅处理 **单段消息**，逻辑清晰、行为可预期  
+- 使用 **内容指纹幂等保护**，避免重复刷同一条复读  
 
 ## 📦 安装
 
-- 直接在astrbot的插件市场搜索astrbot_plugin_reread，点击安装，等待完成即可
-
-- 也可以克隆源码到插件文件夹：
-
-```bash
-# 克隆仓库到插件目录
-cd /AstrBot/data/plugins
-git clone https://github.com/Zhalslar/astrbot_plugin_QQAdmin
-
-# 控制台重启AstrBot
-```
+在 AstrBot 插件市场搜索 **astrbot_plugin_reread**，点击安装即可。
 
 ## ⌨️ 配置
 
-请前往插件配置面板进行配置
-![tmp8498](https://github.com/user-attachments/assets/11b1afa6-371f-4b66-a5cc-14a8b4b2037d)
+请前往插件配置面板进行配置。
+
+主要配置项包括：
+
+- `thresholds`：各消息类型的复读阈值  
+- `repeat_probability`：触发复读的概率  
+- `interrupt_probability`：复读时被“打断”的概率  
+- `require_different_people`：是否要求来自不同用户  
+- `reread_group_whitelist`：群白名单  
+
+## ⚙️ 工作机制说明
+
+- 每个群维护独立的复读状态（内存态，不落库）
+- 按 **消息类型** 分别统计复读窗口
+- 当窗口内消息：
+  - 数量达到阈值
+  - 内容指纹完全一致  
+  才可能触发复读
+- Bot 会记录 **最近一次成功复读的内容指纹**：
+  - 若下一次候选复读内容相同 → 自动跳过  
+  - 无需冷却时间，行为稳定且可预测
+- 图片判等优先使用 `file`，为空时自动退化为 `url / path`
 
 ## 👥 贡献指南
 
-- 🌟 Star 这个项目！（点右上角的星星，感谢支持！）
+- 🌟 Star 本项目（感谢支持）
 - 🐛 提交 Issue 报告问题
 - 💡 提出新功能建议
 - 🔧 提交 Pull Request 改进代码
 
 ## 📌 注意事项
 
-- 注意复读阈值不要调太低，容易刷屏
-- 想第一时间得到反馈的可以来作者的插件反馈群（QQ群）：460973561（不点star不给进）
+- 复读阈值不建议设置过低，容易刷屏
+- 插件只处理单段消息，多段消息会被忽略
+- 想第一时间反馈问题可加入插件反馈群（QQ群）：  
+  **460973561**（不点 Star 不给进）
