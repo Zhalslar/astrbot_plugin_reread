@@ -4,7 +4,7 @@ from collections import deque
 from collections.abc import Sequence
 from typing import TypedDict
 
-from astrbot.api.event import filter
+from astrbot.api.event import filter, MessageChain
 from astrbot.api.star import Context, Star
 from astrbot.core import AstrBotConfig
 from astrbot.core.message.components import BaseMessageComponent, Face, Image, Plain
@@ -221,7 +221,9 @@ class RereadPlugin(Star):
                 out_seg = Plain("打断！")
 
             # 执行复读
-            yield event.chain_result([out_seg])
+            message_chain = MessageChain()
+            message_chain.chain = [out_seg]
+            await self.context.send_message(event.unified_msg_origin, message_chain)
 
             # 标记复读成功
             state.mark_repeated(fingerprint)
