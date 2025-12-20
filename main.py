@@ -221,7 +221,7 @@ class RereadPlugin(Star):
                 out_seg = Plain("打断！")
 
             # 执行复读
-            yield event.chain_result([out_seg])
+            await event.send(event.chain_result([out_seg]))
 
             # 标记复读成功
             state.mark_repeated(fingerprint)
