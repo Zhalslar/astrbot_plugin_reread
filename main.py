@@ -157,7 +157,7 @@ class RereadPlugin(Star):
     # ───────── 主处理逻辑 ─────────
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
-    async def reread_handle(self, event: AstrMessageEvent):
+    async def reread_handle(self, event: AstrMessageEvent) -> None:
         """
         群消息复读处理入口
         """
@@ -221,8 +221,7 @@ class RereadPlugin(Star):
                 out_seg = Plain("打断！")
 
             # 执行复读
-            message_chain = MessageChain()
-            message_chain.chain = [out_seg]
+            message_chain = MessageChain([out_seg])
             await self.context.send_message(event.unified_msg_origin, message_chain)
 
             # 标记复读成功
