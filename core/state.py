@@ -1,17 +1,15 @@
 import asyncio
 from collections import deque
 from typing import TypedDict
-from astrbot.core.message.components import BaseMessageComponent
-
-from .config import PluginConfig
 
 
 class MsgRecord(TypedDict):
     """
-    单条复读窗口记录（仅单段消息）
+    单条复读窗口记录（仅用于判定）
     """
+
     send_id: str
-    seg: BaseMessageComponent
+    fp: str
 
 
 class GroupState:
@@ -26,7 +24,6 @@ class GroupState:
         self.lock = asyncio.Lock()
 
         # {seg_type: deque[MsgRecord]}
-        # deque 的 maxlen 由 thresholds 决定
         self.messages: dict[str, deque[MsgRecord]] = {
             seg_type: deque(maxlen=limit) for seg_type, limit in thresholds.items()
         }
@@ -34,6 +31,7 @@ class GroupState:
         # 最近一次成功复读的内容指纹
         self.last_repeated_fingerprint: str | None = None
 
+    # ───────── 窗口维护 ─────────
 
     def clear_if_same_sender(
         self,
@@ -56,15 +54,15 @@ class GroupState:
         self,
         seg_type: str,
         send_id: str,
-        seg: BaseMessageComponent,
+        fp: str,
     ) -> None:
         """
-        将单段消息压入对应类型的窗口
+        将单段消息指纹压入对应类型的窗口
         """
         self.messages[seg_type].append(
             {
                 "send_id": send_id,
-                "seg": seg,
+                "fp": fp,
             }
         )
 
@@ -103,18 +101,18 @@ class GroupState:
 
 class StateManager:
     """
-    全局状态管理器
+    全局状态管理器（按群）
     """
+
     _group_states: dict[str, GroupState] = {}
-    
-    def __init__(self, config: PluginConfig):
-        self.cfg = config
+
+    def __init__(self, thresholds: dict[str, int]):
+        self.thresholds = thresholds
 
     def get_state(self, gid: str) -> GroupState:
         """
         获取或初始化指定群的状态对象
         """
         if gid not in self._group_states:
-            self._group_states[gid] = GroupState(self.cfg.thresholds)
+            self._group_states[gid] = GroupState(self.thresholds)
         return self._group_states[gid]
-    
