@@ -1,11 +1,11 @@
 {
-    "reread_group_whitelist": {
+    "group_whitelist": {
         "description": "复读群聊白名单",
         "type": "list",
         "hint": "仅在这些群里启用复读功能，留空表示全部群聊启用",
         "default": []
     },
-    "require_different_people": {
+    "need_different": {
         "description": "是否要求消息要来自不同人才复读",
         "type": "bool",
         "hint": "可防止单个人恶意引导复读，如广告哥",
@@ -51,7 +51,7 @@
             }
         }
     },
-    "repeat_probability": {
+    "reread_prob": {
         "description": "复读概率",
         "hint": "到达复读阈值后，进行复读的概率，设小一些可有效防止频繁复读",
         "type": "float",
@@ -62,7 +62,7 @@
         },
         "default": 0.8
     },
-    "interrupt_probability": {
+    "interrupt_prob": {
         "description": "打断复读概率",
         "hint": "满足复读概率后，将复读内容替换成“打断！”的概率，别设太高，小心被打哟~",
         "type": "float",
