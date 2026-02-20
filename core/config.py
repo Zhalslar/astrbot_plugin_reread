@@ -56,9 +56,9 @@ class PluginConfig(ConfigNode):
 
     def get_threshold(self, seg_type: str) -> int:
         return self.thresholds.get(seg_type, 0)
-    
+
     def is_supported_type(self, seg_type: str) -> bool:
         return seg_type in self.supported_type
-    
+
     def is_white_group(self, group_id: str) -> bool:
         return group_id in self.group_whitelist
