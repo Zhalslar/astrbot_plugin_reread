@@ -12,8 +12,8 @@ from astrbot.core.message.components import (
 from astrbot.core.platform import AstrMessageEvent
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
-from .core.state import StateManager
 from .core.config import PluginConfig
+from .core.state import StateManager
 
 
 class RereadPlugin(Star):
