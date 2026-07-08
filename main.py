@@ -1,51 +1,25 @@
-import random
-
 from astrbot.api.event import filter
 from astrbot.api.star import Context, Star
 from astrbot.core import AstrBotConfig
-from astrbot.core.message.components import (
-    BaseMessageComponent,
-    Face,
-    Image,
-    Plain,
-)
 from astrbot.core.platform import AstrMessageEvent
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
-from .core.state import StateManager
+from .core.ban import RereadBanHandler
 from .core.config import PluginConfig
+from .core.engine import RereadEngine
+from .core.state import StateManager
 
 
 class RereadPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.cfg = PluginConfig(config, context)
-        self.state_mgr = StateManager(self.cfg.thresholds)
-
-    # ───────── 指纹生成 ─────────
-
-    @staticmethod
-    def make_fingerprint(seg: BaseMessageComponent) -> str:
-        """
-        为单段消息生成稳定的逻辑指纹
-        """
-        if isinstance(seg, Plain):
-            return f"text:{seg.text}"
-
-        if isinstance(seg, Image):
-            key = seg.file or seg.url or seg.path
-            return f"image:{key}"
-
-        if isinstance(seg, Face):
-            return f"face:{seg.id}"
-
-        return f"unknown:{seg.type}"
-
-    # ───────── 主处理逻辑 ─────────
+        self.cfg = PluginConfig(config)
+        self.state_mgr = StateManager(self.cfg.window_sizes)
+        self.engine = RereadEngine(self.cfg)
+        self.ban_handler = RereadBanHandler(self.cfg)
 
     @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
     async def reread_handle(self, event: AstrMessageEvent):
-        # at / 唤醒指令不处理
         if event.is_at_or_wake_command:
             return
 
@@ -67,47 +41,17 @@ class RereadPlugin(Star):
 
         state = self.state_mgr.get_state(group_id)
 
-        # ========== 进入临界区 ==========
         async with state.lock:
-            # 同人清窗
-            state.clear_if_same_sender(
-                seg_type,
-                send_id,
-                self.cfg.need_different,
-            )
+            plan = self.engine.evaluate(state, seg_type, send_id, seg)
 
-            # 生成指纹（只算一次）
-            fp = self.make_fingerprint(seg)
+        if not plan:
+            return
 
-            # 推进窗口（只存判定信息）
-            state.push_message(seg_type, send_id, fp)
-            msg_list = state.get_messages(seg_type)
+        if plan.action == "ban":
+            await self.ban_handler.handle(event, plan.repeat_count)
+            return
 
-            threshold = self.cfg.get_threshold(seg_type)
-            if len(msg_list) < threshold:
-                return
+        if not plan.output_segment:
+            return
 
-            # ───── 复读一致性判定 ─────
-            first_fp = msg_list[0]["fp"]
-            if any(m["fp"] != first_fp for m in msg_list):
-                return
-
-            # 幂等保护
-            if state.is_same_as_last_repeat(first_fp):
-                return
-
-            # 概率判定
-            if random.random() >= self.cfg.reread_prob:
-                return
-
-            # ───── commit 点（不可回滚） ─────
-            state.mark_repeated(first_fp)
-
-            # ───── 输出准备（直接使用当下 seg） ─────
-            out_seg = (
-                Plain("打断！") if random.random() < self.cfg.interrupt_prob else seg
-            )
-
-        # ========== 出锁，执行 IO ==========
-        await event.send(event.chain_result([out_seg]))
-        event.stop_event()
+        yield event.chain_result([plan.output_segment])

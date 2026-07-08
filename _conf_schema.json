@@ -1,18 +1,18 @@
 {
     "group_whitelist": {
-        "description": "复读群聊白名单",
+        "description": "检测复读的群聊白名单",
         "type": "list",
         "hint": "仅在这些群里启用复读功能，留空表示全部群聊启用",
         "default": []
     },
     "need_different": {
-        "description": "是否要求消息要来自不同人才复读",
+        "description": "多人复读检测",
         "type": "bool",
-        "hint": "可防止单个人恶意引导复读，如广告哥",
+        "hint": "是否要求消息要来自不同人才进行复读检测，此机制可以防止单个人恶意引导复读，如广告哥",
         "default": true
     },
     "thresholds": {
-        "description": "复读阈值设置",
+        "description": "复读检测阈值",
         "type": "object",
         "hint": "阈值太低容易导致刷屏，太高则难以触发复读。注意：考虑到其他类型消息出现得很少，这里仅可配置文本、图片、表情，其他类型一律不复读",
         "items": {
@@ -52,8 +52,8 @@
         }
     },
     "reread_prob": {
-        "description": "复读概率",
-        "hint": "到达复读阈值后，进行复读的概率，设小一些可有效防止频繁复读",
+        "description": "总响应概率",
+        "hint": "到达复读阈值后，是否触发一个动作的概率；触发后再按动作权重随机选择跟随、打断或禁言",
         "type": "float",
         "slider": {
             "min": 0,
@@ -62,15 +62,78 @@
         },
         "default": 0.8
     },
-    "interrupt_prob": {
-        "description": "打断复读概率",
-        "hint": "满足复读概率后，将复读内容替换成“打断！”的概率，别设太高，小心被打哟~",
-        "type": "float",
-        "slider": {
-            "min": 0,
-            "max": 1,
-            "step": 0.01
-        },
-        "default": 0.1
+    "follow": {
+        "description": "响应1：跟随复读",
+        "type": "object",
+        "items": {
+            "weight": {
+                "description": "触发权重",
+                "hint": "触发概率 = 本权重 / 所有动作权重之和；设为 0 则关闭跟随动作",
+                "type": "int",
+                "slider": {
+                    "min": 0,
+                    "max": 100,
+                    "step": 1
+                },
+                "default": 90
+            }
+        }
+    },
+    "interrupt": {
+        "description": "响应2：打断复读",
+        "type": "object",
+        "items": {
+            "weight": {
+                "description": "触发权重",
+                "hint": "触发概率 = 本权重 / 所有动作权重之和；设为 0 则关闭打断动作",
+                "type": "int",
+                "slider": {
+                    "min": 0,
+                    "max": 100,
+                    "step": 1
+                },
+                "default": 5
+            },
+            "text": {
+                "description": "打断文本",
+                "type": "string",
+                "hint": "触发打断动作时发送的文本",
+                "default": "打断！"
+            }
+        }
+    },
+    "ban": {
+        "description": "响应3：禁言复读者",
+        "type": "object",
+        "items": {
+            "weight": {
+                "description": "触发权重",
+                "hint": "触发概率 = 本权重 / 所有动作权重之和；设为 0 则关闭禁言动作",
+                "type": "int",
+                "slider": {
+                    "min": 0,
+                    "max": 100,
+                    "step": 1
+                },
+                "default": 5
+            },
+            "duration": {
+                "description": "禁言时长",
+                "type": "int",
+                "hint": "禁言持续时间，单位为秒，设为 0 等同于关闭禁言动作",
+                "slider": {
+                    "min": 0,
+                    "max": 3600,
+                    "step": 10
+                },
+                "default": 60
+            },
+            "prompt": {
+                "description": "禁言提示词",
+                "type": "text",
+                "hint": "禁言成功后发送的提示词，支持 {user_name}、{user_id}、{group_id}、{ban_duration}、{repeat_count}",
+                "default": "{user_name} 复读过头了，先禁言 {ban_duration} 秒。"
+            }
+        }
     }
 }
